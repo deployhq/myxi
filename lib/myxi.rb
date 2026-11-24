@@ -32,19 +32,26 @@ module Myxi
     attr_writer :bunny
 
     #
-    # Return a channel which this process can always use
+    # Return a channel which this process can always use. A channel RabbitMQ has
+    # closed (a channel error, or a queue that a connection recovery could not
+    # restore) never reopens, so replace it rather than keep failing on it.
     #
     def channel
-      @channel ||= bunny.create_channel
+      if @channel.nil? || !@channel.open?
+        @exchanges = nil
+        @channel = bunny.create_channel
+      end
+      @channel
     end
 
     #
-    # Store a bool of configured exchanges
+    # Store a bool of configured exchanges, bound to the current channel
     #
     def exchanges
+      current_channel = channel
       @exchanges ||= begin
         Myxi::Exchange::EXCHANGES.keys.inject({}) do |hash, name|
-          hash[name.to_sym] = channel.direct(name.to_s)
+          hash[name.to_sym] = current_channel.direct(name.to_s)
           hash
         end
       end

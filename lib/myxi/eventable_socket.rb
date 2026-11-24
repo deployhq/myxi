@@ -34,9 +34,11 @@ module Myxi
       @monitor.interests = :w
     end
 
+    # Deregister first, then close: a socket left registered is reported readable on
+    # every select once the peer has gone.
     def close
-      @socket.close
       @event_loop.selector.deregister(@socket)
+      @socket.close unless @socket.closed?
     end
   end
 end

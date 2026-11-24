@@ -23,7 +23,8 @@ module Myxi
 
       unless options[:touch_interval] == 0
         @timers.every(options[:touch_interval] || 60) do
-          @sessions.each(&:touch)
+          # dup: touch may close a session, which removes it from @sessions
+          @sessions.dup.each(&:touch)
         end
       end
 
@@ -36,7 +37,8 @@ module Myxi
 
           @timers.every(1) do
             @shutdown_timer ||= 0
-            @sessions.each do |session|
+            # dup: close removes the session from @sessions
+            @sessions.dup.each do |session|
               if session.hash % @options[:shutdown_time] == @shutdown_timer % @options[:shutdown_time]
                 session.close
               end
