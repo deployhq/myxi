@@ -197,6 +197,14 @@ module Myxi
     # should verify that subscriptions are still valid etc...
     #
     def touch
+      # A queue whose channel has closed (a RabbitMQ reconnect or channel error) never
+      # delivers again. Close the session so the client reconnects onto a working one.
+      if @queue && !@queue.channel.open?
+        Myxi.logger.info "[#{id}] Closing session: its RabbitMQ channel is closed"
+        close
+        return
+      end
+
       subscriptions.each do |exchange_name, routing_keys|
         if exchange = Myxi::Exchange::EXCHANGES[exchange_name.to_sym]
           routing_keys.each do |routing_key|
@@ -210,16 +218,23 @@ module Myxi
     end
 
     #
-    # Called when the connection for this session is closed
+    # Called when the connection for this session is closed. Idempotent, and the
+    # socket is always released: if it stayed registered, the selector would keep
+    # reporting the dead socket as readable and call this again on every pass.
     #
     def close
+      return if @closed
+      @closed = true
       Myxi.logger.debug "[#{id}] Session closed"
       @event_loop.sessions.delete(self)
-      @queue.delete if @queue
-      while callback = @closure_callbacks.shift
-        callback.call(self)
+      begin
+        delete_queue
+        while callback = @closure_callbacks.shift
+          callback.call(self)
+        end
+      ensure
+        super
       end
-      super
     end
 
     #
@@ -232,6 +247,17 @@ module Myxi
     def send_text_data(data)
       sender = WebSocket::Frame::Outgoing::Server.new(version: @handshake.version, data: data, type: :text)
       write(sender.to_s)
+    end
+
+    private
+
+    # Best effort. RabbitMQ removes an exclusive queue by itself once its channel or
+    # connection closes, which is exactly when deleting it here fails.
+    def delete_queue
+      return unless @queue
+      @queue.delete if @queue.channel.open?
+    rescue StandardError => e
+      Myxi.logger.info "[#{id}] Could not delete queue #{@queue.name}: #{e.class}: #{e.message}"
     end
 
   end
